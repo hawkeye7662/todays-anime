@@ -1,0 +1,16 @@
+{
+  "name": "todays-anime",
+  "private": "true",
+  "version": "1.0.0",
+  "description": "",
+  "license": "MIT",
+  "author": "Hawk Eye",
+  "type": "module",
+  "main": "script.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}
