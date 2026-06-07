@@ -1,58 +1,98 @@
 import fetch from 'node-fetch'
 
-const API_URL = 'https://api.myanimelist.net/v2/users'
-const COUNTDOWN_API = 'https://get-countdown.hawkeyesalt.workers.dev'
+const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK
+const MAL_CLIENT_ID = process.env.MAL_CLIENT_ID
 
 const USERS = {
-  Fried_Saanto: { discordId: '478945648906076160', ping: true },
-  HawkEye7662: { discordId: '293712947623100416', ping: true },
-  Asteriful: { discordId: '685632451707535394', ping: true },
-  Keppix: { discordId: '533342860339183646', ping: true },
-  Ullas_22: { discordId: '839559160071979089', ping: true },
-  MiniJCm: { discordId: '791195889775411200', ping: true },
-  SpiralEnjoyAnime: { discordId: '707975063835639949', ping: true },
-  Ansmol: { discordId: '836253616532226149', ping: true },
-  ThunderCam777: { discordId: '293101052675358721', ping: true },
-  c4sian16: { discordId: '411153226835034122', ping: true },
-  elephantoChan: { discordId: '606080832750485527', ping: true },
+  Fried_Saanto:      { discordId: '478945648906076160', ping: true },
+  HawkEye7662:       { discordId: '293712947623100416', ping: true },
+  Asteriful:         { discordId: '685632451707535394', ping: true },
+  Keppix:            { discordId: '533342860339183646', ping: true },
+  Ullas_22:          { discordId: '839559160071979089', ping: true },
+  MiniJCm:           { discordId: '791195889775411200', ping: true },
+  SpiralEnjoyAnime:  { discordId: '707975063835639949', ping: true },
+  Ansmol:            { discordId: '836253616532226149', ping: true },
+  ThunderCam777:     { discordId: '293101052675358721', ping: true },
+  c4sian16:          { discordId: '411153226835034122', ping: true },
+  elephantoChan:     { discordId: '606080832750485527', ping: true },
 }
 
-const MAL_CLIENT_ID = process.env.MAL_CLIENT_ID
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK
+// ─── AniList ──────────────────────────────────────────────────────────────────
 
-async function main() {
-  const animeMap = await fetchAllUserAnime()
-  const animeWithTimes = await fetchTimestamps([...animeMap.values()])
-  const todaysAnime = filterTodayUTC(animeWithTimes)
-  const message = formatMessage(todaysAnime)
+const ANILIST_URL = 'https://graphql.anilist.co'
 
-  await sendToDiscord(message)
+const AIRING_QUERY = `
+  query AiringToday($start: Int!, $end: Int!, $page: Int!) {
+    Page(page: $page, perPage: 50) {
+      pageInfo { hasNextPage }
+      airingSchedules(airingAt_greater: $start, airingAt_lesser: $end) {
+        airingAt
+        episode
+        media {
+          id
+          idMal
+          title { english romaji }
+        }
+      }
+    }
+  }
+`
+
+async function fetchTodaysAiring() {
+  const now = new Date()
+  const startOfDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  const endOfDay = startOfDay + 86400000 // +24h in ms
+
+  const start = Math.floor(startOfDay / 1000)
+  const end = Math.floor(endOfDay / 1000)
+
+  const results = []
+  let page = 1
+
+  while (true) {
+    const res = await fetch(ANILIST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: AIRING_QUERY, variables: { start, end, page } }),
+    })
+    const { data } = await res.json()
+    const { airingSchedules, pageInfo } = data.Page
+
+    for (const entry of airingSchedules) {
+      results.push({
+        anilistId: entry.media.id,
+        malId: entry.media.idMal,   // comes free from AniList — no conversion API needed
+        title: entry.media.title.english || entry.media.title.romaji,
+        episode: entry.episode,
+        airingAt: entry.airingAt,
+      })
+    }
+
+    if (!pageInfo.hasNextPage) break
+    page++
+  }
+
+  return results
 }
 
-main().catch(console.error)
+// ─── MAL user watchlists ──────────────────────────────────────────────────────
 
-async function fetchAllUserAnime() {
+const MAL_API = 'https://api.myanimelist.net/v2/users'
+
+async function fetchAllUserWatchlists() {
+  // Returns a Map<malId, string[]> — mal id → list of usernames watching it
   const map = new Map()
 
-  for (const user of Object.keys(USERS)) {
-    let url = `${API_URL}/${user}/animelist?status=watching&limit=100&fields=alternative_titles&nsfw=true`
-
+  for (const username of Object.keys(USERS)) {
+    let url = `${MAL_API}/${username}/animelist?status=watching&limit=100&nsfw=true`
     while (url) {
-      const res = await fetch(url, {
-        headers: { 'X-MAL-CLIENT-ID': MAL_CLIENT_ID },
-      })
-
+      const res = await fetch(url, { headers: { 'X-MAL-CLIENT-ID': MAL_CLIENT_ID } })
       if (!res.ok) break
-
       const data = await res.json()
-
       for (const { node } of data.data) {
-        if (!map.has(node.id)) {
-          map.set(node.id, { ...node, viewers: [] })
-        }
-        map.get(node.id).viewers.push(user)
+        if (!map.has(node.id)) map.set(node.id, [])
+        map.get(node.id).push(username)
       }
-
       url = data.paging?.next ?? null
     }
   }
@@ -60,60 +100,33 @@ async function fetchAllUserAnime() {
   return map
 }
 
-async function fetchTimestamps(animeList) {
-  const result = []
+// ─── Format & send ───────────────────────────────────────────────────────────
 
-  for (const anime of animeList) {
-    try {
-      const res = await fetch(`${COUNTDOWN_API}/${anime.id}`)
-      const data = await res.json()
+function formatMessage(airingToday, watchlistMap) {
+  // Only keep anime that at least one user is watching
+  const relevant = airingToday
+    .filter(a => a.malId && watchlistMap.has(a.malId))
+    .sort((a, b) => a.airingAt - b.airingAt)
 
-      if (!data?.nextEpisodeAirDate) continue
-
-      result.push({
-        ...anime,
-        timestamp: data.nextEpisodeAirDate,
-      })
-    } catch {}
-  }
-
-  return result
-}
-function filterTodayUTC(animeList) {
-  const start = new Date()
-  start.setUTCHours(0, 0, 0, 0)
-
-  const end = new Date()
-  end.setUTCHours(23, 59, 59, 999)
-
-  return animeList.filter((a) => {
-    const t = a.timestamp * 1000
-    return t >= start.getTime() && t <= end.getTime()
-  })
-}
-function formatMessage(animeList) {
-  if (!animeList.length) {
+  if (!relevant.length) {
     return "# Today's Anime\nNo anime airing today 😔"
   }
 
   const lines = ["# Today's Anime"]
-
-  animeList
-    .sort((a, b) => a.timestamp - b.timestamp)
-    .forEach((anime) => {
-      lines.push(`## ${anime.alternative_titles?.en || anime.title}`)
-
-      const viewerNames = anime.viewers.map((user) => {
-        const { discordId, ping } = USERS[user]
-        return ping && discordId ? `<@${discordId}>` : user
-      })
-
-      lines.push(`Viewers: ${viewerNames.join(', ')}`)
-      lines.push(`Time: <t:${anime.timestamp}>`)
+  for (const anime of relevant) {
+    const viewers = watchlistMap.get(anime.malId).map(username => {
+      const { discordId, ping } = USERS[username]
+      return ping && discordId ? `<@${discordId}>` : username
     })
+
+    lines.push(`## ${anime.title} (ep. ${anime.episode})`)
+    lines.push(`Viewers: ${viewers.join(', ')}`)
+    lines.push(`Time: <t:${anime.airingAt}>`)
+  }
 
   return lines.join('\n')
 }
+
 async function sendToDiscord(content) {
   await fetch(DISCORD_WEBHOOK, {
     method: 'POST',
@@ -121,3 +134,16 @@ async function sendToDiscord(content) {
     body: JSON.stringify({ content }),
   })
 }
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+async function main() {
+  const [airingToday, watchlistMap] = await Promise.all([
+    fetchTodaysAiring(),
+    fetchAllUserWatchlists(),
+  ])
+  const message = formatMessage(airingToday, watchlistMap)
+  await sendToDiscord(message)
+}
+
+main().catch(console.error)
