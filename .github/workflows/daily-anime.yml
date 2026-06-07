@@ -2,7 +2,7 @@ name: Daily Anime
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '17 0 * * *'   # 00:17 UTC — less congested
   workflow_dispatch:
 
 jobs:
