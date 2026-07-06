@@ -547,6 +547,10 @@ function getMalUpdateLink(malId) {
   return `https://myanimelist.net/ownlist/anime/${malId}/edit?hideLayout=0`
 }
 
+function getMalAnimeLink(malId) {
+  return `https://myanimelist.net/anime/${malId}`
+}
+
 function getReleaseDescription(sectionTitle, releasedAt) {
   return [sectionTitle, `Released: <t:${releasedAt}:R>`].join('\n')
 }
@@ -735,7 +739,7 @@ function createReleaseEntry(anime, usernames, sectionTitle, watchlistMap) {
     mentions: getReleasePingMentions(anime, usernames, watchlistMap),
     embed: {
       title: `${anime.title} (ep. ${anime.episode})`,
-      url: getMalUpdateLink(anime.malId),
+      url: getMalAnimeLink(anime.malId),
       description: getReleaseDescription(sectionTitle, anime.release.releasedAt),
       color: toDiscordColor(anime.coverImageColor) ?? 0x5865f2,
       thumbnail: anime.coverImage ? { url: anime.coverImage } : undefined,
