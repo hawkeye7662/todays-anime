@@ -12,18 +12,19 @@ const RELEASE_STATE_FILE =
 const RELEASE_STATE_RETENTION_SECONDS = 14 * 24 * 60 * 60
 
 const USERS = {
-  Fried_Saanto: { discordId: '478945648906076160', ping: true },
-  HawkEye7662: { discordId: '293712947623100416', ping: true },
-  Asteriful: { discordId: '685632451707535394', ping: true },
-  Keppix: { discordId: '533342860339183646', ping: true },
-  Ullas_22: { discordId: '839559160071979089', ping: true },
-  MiniJCm: { discordId: '791195889775411200', ping: true },
-  SpiralEnjoyAnime: { discordId: '707975063835639949', ping: true },
-  Ansmol: { discordId: '836253616532226149', ping: true },
-  ThunderCam777: { discordId: '293101052675358721', ping: true },
-  c4sian16: { discordId: '411153226835034122', ping: true },
-  elephantoChan: { discordId: '606080832750485527', ping: true },
-  EllesHere: { discordId: '264913847347838996', ping: true },
+  // Set pingSummary and pingRelease per user to control which notifications mention them.
+  Fried_Saanto: { discordId: '478945648906076160', pingSummary: true, pingRelease: true },
+  HawkEye7662: { discordId: '293712947623100416', pingSummary: true, pingRelease: true },
+  Asteriful: { discordId: '685632451707535394', pingSummary: true, pingRelease: true },
+  Keppix: { discordId: '533342860339183646', pingSummary: true, pingRelease: true },
+  Ullas_22: { discordId: '839559160071979089', pingSummary: true, pingRelease: true },
+  MiniJCm: { discordId: '791195889775411200', pingSummary: true, pingRelease: true },
+  SpiralEnjoyAnime: { discordId: '707975063835639949', pingSummary: true, pingRelease: true },
+  Ansmol: { discordId: '836253616532226149', pingSummary: true, pingRelease: true },
+  ThunderCam777: { discordId: '293101052675358721', pingSummary: true, pingRelease: true },
+  c4sian16: { discordId: '411153226835034122', pingSummary: true, pingRelease: true },
+  elephantoChan: { discordId: '606080832750485527', pingSummary: true, pingRelease: true },
+  EllesHere: { discordId: '264913847347838996', pingSummary: true, pingRelease: true },
 }
 
 // ─── AniList ──────────────────────────────────────────────────────────────────
@@ -311,10 +312,32 @@ function toDiscordColor(color) {
   return Number.parseInt(color.slice(1), 16)
 }
 
-function getViewerLabels(usernames) {
+function shouldPingUser(username, mode) {
+  const user = USERS[username]
+
+  if (!user?.discordId) {
+    return false
+  }
+
+  if (mode === 'summary' && typeof user.pingSummary === 'boolean') {
+    return user.pingSummary
+  }
+
+  if (mode === 'release' && typeof user.pingRelease === 'boolean') {
+    return user.pingRelease
+  }
+
+  if (typeof user.ping === 'boolean') {
+    return user.ping
+  }
+
+  return false
+}
+
+function getViewerLabels(usernames, mode) {
   return usernames.map((username) => {
-    const { discordId, ping } = USERS[username]
-    return ping && discordId ? `<@${discordId}>` : username
+    const { discordId } = USERS[username]
+    return shouldPingUser(username, mode) && discordId ? `<@${discordId}>` : username
   })
 }
 
@@ -417,7 +440,7 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
   const lines = ["# Today's Anime"]
 
   for (const anime of watching) {
-    const viewers = getViewerLabels(watchlistMap.get(anime.malId).watchers)
+    const viewers = getViewerLabels(watchlistMap.get(anime.malId).watchers, 'summary')
     lines.push(`## ${anime.title} (ep. ${anime.episode})`)
     lines.push(`Viewers: ${viewers.join(', ')}`)
     lines.push(`Time: <t:${anime.airingAt}>`)
@@ -427,7 +450,7 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
     lines.push(`\n## 📋 Plan to Watch`)
 
     for (const anime of ptw) {
-      const viewers = getViewerLabels(watchlistMap.get(anime.malId).ptwers)
+      const viewers = getViewerLabels(watchlistMap.get(anime.malId).ptwers, 'summary')
       lines.push(`### ${anime.title}`)
       lines.push(`Viewers: ${viewers.join(', ')}`)
       lines.push(`Time: <t:${anime.airingAt}>`)
@@ -438,7 +461,7 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
 }
 
 function createReleaseEntry(anime, usernames, sectionTitle) {
-  const viewers = getViewerLabels(usernames)
+  const viewers = getViewerLabels(usernames, 'release')
 
   return {
     content: `**${anime.title}** ${viewers.join(' ')}`.trim(),
