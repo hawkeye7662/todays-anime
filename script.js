@@ -12,66 +12,79 @@ const RELEASE_STATE_FILE =
 const RELEASE_STATE_RETENTION_SECONDS = 14 * 24 * 60 * 60
 
 const USERS = {
-  // Set pingSummary and pingRelease per user to control which notifications mention them.
+  // maxReleasePingBehindEpisodes controls how far behind a watcher can be and still get pinged outside the embed.
+  // null means always ping for release alerts, 1 means ping only when they are at most 1 episode behind.
   Fried_Saanto: {
     discordId: '478945648906076160',
     pingSummary: true,
     pingRelease: false,
+    maxReleasePingBehindEpisodes: null,
   },
   HawkEye7662: {
     discordId: '293712947623100416',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
   Asteriful: {
     discordId: '685632451707535394',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
   Keppix: {
     discordId: '533342860339183646',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
   Ullas_22: {
     discordId: '839559160071979089',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
   MiniJCm: {
     discordId: '791195889775411200',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
   SpiralEnjoyAnime: {
     discordId: '707975063835639949',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
   Ansmol: {
     discordId: '836253616532226149',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
   ThunderCam777: {
     discordId: '293101052675358721',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
   c4sian16: {
     discordId: '411153226835034122',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
   elephantoChan: {
     discordId: '606080832750485527',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
   EllesHere: {
     discordId: '264913847347838996',
     pingSummary: true,
     pingRelease: true,
+    maxReleasePingBehindEpisodes: null,
   },
 }
 
@@ -410,6 +423,31 @@ function getPingMentions(usernames, mode) {
   })
 }
 
+function shouldPingReleaseMention(anime, username, watchlistMap) {
+  if (!shouldPingUser(username, 'release')) {
+    return false
+  }
+
+  const threshold = USERS[username]?.maxReleasePingBehindEpisodes
+  if (threshold == null) {
+    return true
+  }
+
+  const watchedEpisodes =
+    watchlistMap.get(anime.malId)?.watcherProgress?.[username]
+
+  return getBehindCount(watchedEpisodes, anime.episode) <= threshold
+}
+
+function getReleasePingMentions(anime, usernames, watchlistMap) {
+  return usernames.flatMap((username) => {
+    const { discordId } = USERS[username]
+    return shouldPingReleaseMention(anime, username, watchlistMap) && discordId
+      ? [`<@${discordId}>`]
+      : []
+  })
+}
+
 function getMalUpdateLink(malId) {
   return `https://myanimelist.net/ownlist/anime/${malId}/edit?hideLayout=0`
 }
@@ -419,12 +457,20 @@ function formatBehindIndicator(watchedEpisodes, currentEpisode) {
     return null
   }
 
-  const behindCount = Math.max(0, currentEpisode - 1 - watchedEpisodes)
+  const behindCount = getBehindCount(watchedEpisodes, currentEpisode)
   if (behindCount <= 0) {
     return null
   }
 
   return `${behindCount} episode${behindCount === 1 ? '' : 's'} behind`
+}
+
+function getBehindCount(watchedEpisodes, currentEpisode) {
+  if (!Number.isFinite(watchedEpisodes)) {
+    return 0
+  }
+
+  return Math.max(0, currentEpisode - 1 - watchedEpisodes)
 }
 
 function formatWatchingViewerLines(anime, usernames, watchlistMap) {
@@ -584,9 +630,9 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
   return lines.join('\n')
 }
 
-function createReleaseEntry(anime, usernames, sectionTitle) {
+function createReleaseEntry(anime, usernames, sectionTitle, watchlistMap) {
   return {
-    mentions: getPingMentions(usernames, 'release'),
+    mentions: getReleasePingMentions(anime, usernames, watchlistMap),
     embed: {
       title: `${anime.title} (ep. ${anime.episode})`,
       url: getMalUpdateLink(anime.malId),
@@ -606,6 +652,7 @@ function createReleasePayloads(watching, ptw, watchlistMap) {
           anime,
           watchlistMap.get(anime.malId).watchers,
           'Episode out now',
+          watchlistMap,
         ),
         [
           {
@@ -629,6 +676,7 @@ function createReleasePayloads(watching, ptw, watchlistMap) {
           anime,
           watchlistMap.get(anime.malId).ptwers,
           'Plan to watch premiere out now',
+          watchlistMap,
         ),
         [
           {
