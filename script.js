@@ -13,18 +13,66 @@ const RELEASE_STATE_RETENTION_SECONDS = 14 * 24 * 60 * 60
 
 const USERS = {
   // Set pingSummary and pingRelease per user to control which notifications mention them.
-  Fried_Saanto: { discordId: '478945648906076160', pingSummary: true, pingRelease: true },
-  HawkEye7662: { discordId: '293712947623100416', pingSummary: true, pingRelease: true },
-  Asteriful: { discordId: '685632451707535394', pingSummary: true, pingRelease: true },
-  Keppix: { discordId: '533342860339183646', pingSummary: true, pingRelease: true },
-  Ullas_22: { discordId: '839559160071979089', pingSummary: true, pingRelease: true },
-  MiniJCm: { discordId: '791195889775411200', pingSummary: true, pingRelease: true },
-  SpiralEnjoyAnime: { discordId: '707975063835639949', pingSummary: true, pingRelease: true },
-  Ansmol: { discordId: '836253616532226149', pingSummary: true, pingRelease: true },
-  ThunderCam777: { discordId: '293101052675358721', pingSummary: true, pingRelease: true },
-  c4sian16: { discordId: '411153226835034122', pingSummary: true, pingRelease: true },
-  elephantoChan: { discordId: '606080832750485527', pingSummary: true, pingRelease: true },
-  EllesHere: { discordId: '264913847347838996', pingSummary: true, pingRelease: true },
+  Fried_Saanto: {
+    discordId: '478945648906076160',
+    pingSummary: true,
+    pingRelease: false,
+  },
+  HawkEye7662: {
+    discordId: '293712947623100416',
+    pingSummary: true,
+    pingRelease: true,
+  },
+  Asteriful: {
+    discordId: '685632451707535394',
+    pingSummary: true,
+    pingRelease: true,
+  },
+  Keppix: {
+    discordId: '533342860339183646',
+    pingSummary: true,
+    pingRelease: true,
+  },
+  Ullas_22: {
+    discordId: '839559160071979089',
+    pingSummary: true,
+    pingRelease: true,
+  },
+  MiniJCm: {
+    discordId: '791195889775411200',
+    pingSummary: true,
+    pingRelease: true,
+  },
+  SpiralEnjoyAnime: {
+    discordId: '707975063835639949',
+    pingSummary: true,
+    pingRelease: true,
+  },
+  Ansmol: {
+    discordId: '836253616532226149',
+    pingSummary: true,
+    pingRelease: true,
+  },
+  ThunderCam777: {
+    discordId: '293101052675358721',
+    pingSummary: true,
+    pingRelease: true,
+  },
+  c4sian16: {
+    discordId: '411153226835034122',
+    pingSummary: true,
+    pingRelease: true,
+  },
+  elephantoChan: {
+    discordId: '606080832750485527',
+    pingSummary: true,
+    pingRelease: true,
+  },
+  EllesHere: {
+    discordId: '264913847347838996',
+    pingSummary: true,
+    pingRelease: true,
+  },
 }
 
 // ─── AniList ──────────────────────────────────────────────────────────────────
@@ -148,7 +196,9 @@ function buildTitleCandidates(anime) {
     }
   }
 
-  return [...candidates].sort((a, b) => splitTitleWords(b).length - splitTitleWords(a).length)
+  return [...candidates].sort(
+    (a, b) => splitTitleWords(b).length - splitTitleWords(a).length,
+  )
 }
 
 function parseSubsPleaseFeed(xml) {
@@ -160,7 +210,12 @@ function parseSubsPleaseFeed(xml) {
     const link = extractXmlField(itemXml, 'link')
     const pubDate = extractXmlField(itemXml, 'pubDate')
 
-    if (!title || !link || !pubDate || SUBSPLEASE_EXCLUDED_TITLE_REGEX.test(title)) {
+    if (
+      !title ||
+      !link ||
+      !pubDate ||
+      SUBSPLEASE_EXCLUDED_TITLE_REGEX.test(title)
+    ) {
       continue
     }
 
@@ -201,7 +256,8 @@ function getRelevantAnime(airingToday, watchlistMap) {
     (anime) => watchlistMap.get(anime.malId).watchers.length > 0,
   )
   const ptw = relevant.filter(
-    (anime) => anime.episode === 1 && watchlistMap.get(anime.malId).ptwers.length > 0,
+    (anime) =>
+      anime.episode === 1 && watchlistMap.get(anime.malId).ptwers.length > 0,
   )
 
   return { relevant, watching, ptw }
@@ -278,7 +334,9 @@ async function saveReleaseState(state, nowTimestamp) {
 }
 
 function filterUnnotifiedAnime(animeList, notifiedReleaseKeys) {
-  return animeList.filter((anime) => !notifiedReleaseKeys.has(getReleaseKey(anime)))
+  return animeList.filter(
+    (anime) => !notifiedReleaseKeys.has(getReleaseKey(anime)),
+  )
 }
 
 function extendReleaseState(state, animeList) {
@@ -337,15 +395,64 @@ function shouldPingUser(username, mode) {
 function getViewerLabels(usernames, mode) {
   return usernames.map((username) => {
     const { discordId } = USERS[username]
-    return shouldPingUser(username, mode) && discordId ? `<@${discordId}>` : username
+    return shouldPingUser(username, mode) && discordId
+      ? `<@${discordId}>`
+      : username
   })
 }
 
 function getPingMentions(usernames, mode) {
   return usernames.flatMap((username) => {
     const { discordId } = USERS[username]
-    return shouldPingUser(username, mode) && discordId ? [`<@${discordId}>`] : []
+    return shouldPingUser(username, mode) && discordId
+      ? [`<@${discordId}>`]
+      : []
   })
+}
+
+function getMalUpdateLink(malId) {
+  return `https://myanimelist.net/ownlist/anime/${malId}/edit?hideLayout=0`
+}
+
+function formatBehindIndicator(watchedEpisodes, currentEpisode) {
+  if (!Number.isFinite(watchedEpisodes)) {
+    return null
+  }
+
+  const behindCount = Math.max(0, currentEpisode - 1 - watchedEpisodes)
+  if (behindCount <= 0) {
+    return null
+  }
+
+  return `${behindCount} episode${behindCount === 1 ? '' : 's'} behind`
+}
+
+function formatWatchingViewerLines(anime, usernames, watchlistMap) {
+  const { watcherProgress } = watchlistMap.get(anime.malId)
+
+  return usernames.map((username) => {
+    const viewer = getViewerLabels([username], 'release')[0]
+    const behindIndicator = formatBehindIndicator(
+      watcherProgress[username],
+      anime.episode,
+    )
+
+    return behindIndicator ? `${viewer} — ${behindIndicator}` : viewer
+  })
+}
+
+function formatPtwViewerLines(anime, usernames, watchlistMap) {
+  return getViewerLabels(watchlistMap.get(anime.malId).ptwers, 'release')
+}
+
+function withReleaseFields(entry, fields) {
+  return {
+    ...entry,
+    embed: {
+      ...entry.embed,
+      fields,
+    },
+  }
 }
 
 async function fetchTodaysAiring() {
@@ -413,7 +520,7 @@ async function fetchAllUserWatchlists() {
 
   for (const username of Object.keys(USERS)) {
     for (const status of ['watching', 'plan_to_watch']) {
-      let url = `${MAL_API}/${username}/animelist?status=${status}&limit=100&nsfw=true`
+      let url = `${MAL_API}/${username}/animelist?status=${status}&limit=100&nsfw=true&fields=list_status`
 
       while (url) {
         const res = await fetch(url, {
@@ -421,10 +528,14 @@ async function fetchAllUserWatchlists() {
         })
         assertOk(res, `Failed to fetch MAL list for ${username} (${status})`)
         const data = await res.json()
-        for (const { node } of data.data) {
-          if (!map.has(node.id)) map.set(node.id, { watchers: [], ptwers: [] })
+        for (const { node, list_status: listStatus } of data.data) {
+          if (!map.has(node.id)) {
+            map.set(node.id, { watchers: [], ptwers: [], watcherProgress: {} })
+          }
           if (status === 'watching') {
             map.get(node.id).watchers.push(username)
+            map.get(node.id).watcherProgress[username] =
+              listStatus?.num_episodes_watched ?? 0
           } else {
             map.get(node.id).ptwers.push(username)
           }
@@ -447,7 +558,10 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
   const lines = ["# Today's Anime"]
 
   for (const anime of watching) {
-    const viewers = getViewerLabels(watchlistMap.get(anime.malId).watchers, 'summary')
+    const viewers = getViewerLabels(
+      watchlistMap.get(anime.malId).watchers,
+      'summary',
+    )
     lines.push(`## ${anime.title} (ep. ${anime.episode})`)
     lines.push(`Viewers: ${viewers.join(', ')}`)
     lines.push(`Time: <t:${anime.airingAt}>`)
@@ -457,7 +571,10 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
     lines.push(`\n## 📋 Plan to Watch`)
 
     for (const anime of ptw) {
-      const viewers = getViewerLabels(watchlistMap.get(anime.malId).ptwers, 'summary')
+      const viewers = getViewerLabels(
+        watchlistMap.get(anime.malId).ptwers,
+        'summary',
+      )
       lines.push(`### ${anime.title}`)
       lines.push(`Viewers: ${viewers.join(', ')}`)
       lines.push(`Time: <t:${anime.airingAt}>`)
@@ -468,21 +585,13 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
 }
 
 function createReleaseEntry(anime, usernames, sectionTitle) {
-  const viewers = getViewerLabels(usernames, 'release')
-  const mentions = getPingMentions(usernames, 'release')
-
   return {
-    mentions,
+    mentions: getPingMentions(usernames, 'release'),
     embed: {
       title: `${anime.title} (ep. ${anime.episode})`,
+      url: getMalUpdateLink(anime.malId),
       description: `${sectionTitle}\nReleased: <t:${anime.release.releasedAt}:R>`,
       color: toDiscordColor(anime.coverImageColor) ?? 0x5865f2,
-      fields: [
-        {
-          name: 'Viewers',
-          value: viewers.join(', '),
-        },
-      ],
       thumbnail: anime.coverImage ? { url: anime.coverImage } : undefined,
       timestamp: new Date(anime.release.releasedAt * 1000).toISOString(),
     },
@@ -492,17 +601,49 @@ function createReleaseEntry(anime, usernames, sectionTitle) {
 function createReleasePayloads(watching, ptw, watchlistMap) {
   const entries = [
     ...watching.map((anime) =>
-      createReleaseEntry(
-        anime,
-        watchlistMap.get(anime.malId).watchers,
-        'Episode out now',
+      withReleaseFields(
+        createReleaseEntry(
+          anime,
+          watchlistMap.get(anime.malId).watchers,
+          'Episode out now',
+        ),
+        [
+          {
+            name: 'Viewers',
+            value: formatWatchingViewerLines(
+              anime,
+              watchlistMap.get(anime.malId).watchers,
+              watchlistMap,
+            ).join('\n'),
+          },
+          {
+            name: 'MAL',
+            value: `[Update your list](${getMalUpdateLink(anime.malId)})`,
+          },
+        ],
       ),
     ),
     ...ptw.map((anime) =>
-      createReleaseEntry(
-        anime,
-        watchlistMap.get(anime.malId).ptwers,
-        'Plan to watch premiere out now',
+      withReleaseFields(
+        createReleaseEntry(
+          anime,
+          watchlistMap.get(anime.malId).ptwers,
+          'Plan to watch premiere out now',
+        ),
+        [
+          {
+            name: 'Viewers',
+            value: formatPtwViewerLines(
+              anime,
+              watchlistMap.get(anime.malId).ptwers,
+              watchlistMap,
+            ).join('\n'),
+          },
+          {
+            name: 'MAL',
+            value: `[Update your list](${getMalUpdateLink(anime.malId)})`,
+          },
+        ],
       ),
     ),
   ]
