@@ -341,6 +341,13 @@ function getViewerLabels(usernames, mode) {
   })
 }
 
+function getPingMentions(usernames, mode) {
+  return usernames.flatMap((username) => {
+    const { discordId } = USERS[username]
+    return shouldPingUser(username, mode) && discordId ? [`<@${discordId}>`] : []
+  })
+}
+
 async function fetchTodaysAiring() {
   const now = new Date()
   const startOfDay = Date.UTC(
@@ -462,13 +469,20 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
 
 function createReleaseEntry(anime, usernames, sectionTitle) {
   const viewers = getViewerLabels(usernames, 'release')
+  const mentions = getPingMentions(usernames, 'release')
 
   return {
-    content: `**${anime.title}** ${viewers.join(' ')}`.trim(),
+    mentions,
     embed: {
       title: `${anime.title} (ep. ${anime.episode})`,
       description: `${sectionTitle}\nReleased: <t:${anime.release.releasedAt}:R>`,
       color: toDiscordColor(anime.coverImageColor) ?? 0x5865f2,
+      fields: [
+        {
+          name: 'Viewers',
+          value: viewers.join(', '),
+        },
+      ],
       thumbnail: anime.coverImage ? { url: anime.coverImage } : undefined,
       timestamp: new Date(anime.release.releasedAt * 1000).toISOString(),
     },
@@ -498,7 +512,7 @@ function createReleasePayloads(watching, ptw, watchlistMap) {
   }
 
   return chunkArray(entries, 10).map((chunk) => ({
-    content: chunk.map((entry) => entry.content).join('\n'),
+    content: [...new Set(chunk.flatMap((entry) => entry.mentions))].join(' '),
     embeds: chunk.map((entry) => entry.embed),
   }))
 }
