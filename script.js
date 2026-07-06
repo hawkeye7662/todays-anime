@@ -61,7 +61,7 @@ async function fetchTodaysAiring() {
     for (const entry of airingSchedules) {
       results.push({
         anilistId: entry.media.id,
-        malId: entry.media.idMal,   // comes free from AniList — no conversion API needed
+        malId: entry.media.idMal,
         title: entry.media.title.english || entry.media.title.romaji,
         episode: entry.episode,
         airingAt: entry.airingAt,
@@ -80,48 +80,71 @@ async function fetchTodaysAiring() {
 const MAL_API = 'https://api.myanimelist.net/v2/users'
 
 async function fetchAllUserWatchlists() {
-  // Returns a Map<malId, string[]> — mal id → list of usernames watching it
+  // Returns a Map<malId, { watchers: string[], ptwers: string[] }>
   const map = new Map()
 
   for (const username of Object.keys(USERS)) {
-    let url = `${MAL_API}/${username}/animelist?status=watching&limit=100&nsfw=true`
-    while (url) {
-      const res = await fetch(url, { headers: { 'X-MAL-CLIENT-ID': MAL_CLIENT_ID } })
-      if (!res.ok) break
-      const data = await res.json()
-      for (const { node } of data.data) {
-        if (!map.has(node.id)) map.set(node.id, [])
-        map.get(node.id).push(username)
+    for (const status of ['watching', 'plan_to_watch']) {
+      let url = `${MAL_API}/${username}/animelist?status=${status}&limit=100&nsfw=true`
+
+      while (url) {
+        const res = await fetch(url, { headers: { 'X-MAL-CLIENT-ID': MAL_CLIENT_ID } })
+        if (!res.ok) break
+        const data = await res.json()
+        for (const { node } of data.data) {
+          if (!map.has(node.id)) map.set(node.id, { watchers: [], ptwers: [] })
+          if (status === 'watching') {
+            map.get(node.id).watchers.push(username)
+          } else {
+            map.get(node.id).ptwers.push(username)
+          }
+        }
+        url = data.paging?.next ?? null
       }
-      url = data.paging?.next ?? null
     }
   }
 
   return map
 }
 
-// ─── Format & send ───────────────────────────────────────────────────────────
+// ─── Format & send ────────────────────────────────────────────────────────────
 
 function formatMessage(airingToday, watchlistMap) {
-  // Only keep anime that at least one user is watching
   const relevant = airingToday
     .filter(a => a.malId && watchlistMap.has(a.malId))
     .sort((a, b) => a.airingAt - b.airingAt)
 
-  if (!relevant.length) {
+  const watching = relevant.filter(a => watchlistMap.get(a.malId).watchers.length > 0)
+  const ptw = relevant.filter(a => a.episode === 1 && watchlistMap.get(a.malId).ptwers.length > 0)
+
+  if (!watching.length && !ptw.length) {
     return "# Today's Anime\nNo anime airing today 😔"
   }
 
   const lines = ["# Today's Anime"]
-  for (const anime of relevant) {
-    const viewers = watchlistMap.get(anime.malId).map(username => {
+
+  for (const anime of watching) {
+    const viewers = watchlistMap.get(anime.malId).watchers.map(username => {
       const { discordId, ping } = USERS[username]
       return ping && discordId ? `<@${discordId}>` : username
     })
-
     lines.push(`## ${anime.title} (ep. ${anime.episode})`)
     lines.push(`Viewers: ${viewers.join(', ')}`)
     lines.push(`Time: <t:${anime.airingAt}>`)
+  }
+
+  if (ptw.length) {
+    lines.push(`\n## 📋 Plan to Watch`)
+
+    for (const anime of ptw) {
+      const viewers = watchlistMap.get(anime.malId).ptwers.map(username => {
+        const { discordId, ping } = USERS[username]
+        return ping && discordId ? `<@${discordId}>` : username
+      })
+      lines.push(`### ${anime.title}`)
+      lines.push(`Viewers: ${viewers.join(', ')}`)
+      lines.push(`Time: <t:${anime.airingAt}>`)
+    }
   }
 
   return lines.join('\n')
