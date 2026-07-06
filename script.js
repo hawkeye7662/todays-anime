@@ -12,78 +12,90 @@ const RELEASE_STATE_FILE =
 const RELEASE_STATE_RETENTION_SECONDS = 14 * 24 * 60 * 60
 
 const USERS = {
-  // maxReleasePingBehindEpisodes controls how far behind a watcher can be and still get pinged outside the embed.
-  // null means always ping for release alerts, 1 means ping only when they are at most 1 episode behind.
+  // maxSummaryPingBehindEpisodes and maxReleasePingBehindEpisodes control how far behind a watcher can be
+  // and still get pinged for the morning summary or release alerts. null means always ping.
   Fried_Saanto: {
     discordId: '478945648906076160',
     pingSummary: true,
     pingRelease: false,
+    maxSummaryPingBehindEpisodes: 2,
     maxReleasePingBehindEpisodes: null,
   },
   HawkEye7662: {
     discordId: '293712947623100416',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
   Asteriful: {
     discordId: '685632451707535394',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
   Keppix: {
     discordId: '533342860339183646',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
   Ullas_22: {
     discordId: '839559160071979089',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
   MiniJCm: {
     discordId: '791195889775411200',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
   SpiralEnjoyAnime: {
     discordId: '707975063835639949',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
   Ansmol: {
     discordId: '836253616532226149',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
   ThunderCam777: {
     discordId: '293101052675358721',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
   c4sian16: {
     discordId: '411153226835034122',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
   elephantoChan: {
     discordId: '606080832750485527',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
   EllesHere: {
     discordId: '264913847347838996',
     pingSummary: true,
     pingRelease: true,
+    maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
 }
@@ -423,6 +435,32 @@ function getPingMentions(usernames, mode) {
   })
 }
 
+function shouldPingSummaryMention(anime, username, watchlistMap) {
+  if (!shouldPingUser(username, 'summary')) {
+    return false
+  }
+
+  const threshold = USERS[username]?.maxSummaryPingBehindEpisodes
+  if (threshold == null) {
+    return true
+  }
+
+  const watchedEpisodes = watchlistMap.get(anime.malId)?.watcherProgress?.[
+    username
+  ]
+
+  return getBehindCount(watchedEpisodes, anime.episode) <= threshold
+}
+
+function getSummaryViewerLabels(anime, usernames, watchlistMap) {
+  return usernames.map((username) => {
+    const { discordId } = USERS[username]
+    return shouldPingSummaryMention(anime, username, watchlistMap) && discordId
+      ? `<@${discordId}>`
+      : username
+  })
+}
+
 function shouldPingReleaseMention(anime, username, watchlistMap) {
   if (!shouldPingUser(username, 'release')) {
     return false
@@ -433,8 +471,9 @@ function shouldPingReleaseMention(anime, username, watchlistMap) {
     return true
   }
 
-  const watchedEpisodes =
-    watchlistMap.get(anime.malId)?.watcherProgress?.[username]
+  const watchedEpisodes = watchlistMap.get(anime.malId)?.watcherProgress?.[
+    username
+  ]
 
   return getBehindCount(watchedEpisodes, anime.episode) <= threshold
 }
@@ -604,9 +643,10 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
   const lines = ["# Today's Anime"]
 
   for (const anime of watching) {
-    const viewers = getViewerLabels(
+    const viewers = getSummaryViewerLabels(
+      anime,
       watchlistMap.get(anime.malId).watchers,
-      'summary',
+      watchlistMap,
     )
     lines.push(`## ${anime.title} (ep. ${anime.episode})`)
     lines.push(`Viewers: ${viewers.join(', ')}`)
