@@ -6,12 +6,15 @@ const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK
 const MAL_CLIENT_ID = process.env.MAL_CLIENT_ID
 const NOTIFICATION_MODE = process.env.NOTIFICATION_MODE ?? 'summary'
 const IGNORE_RELEASE_CACHE = process.env.IGNORE_RELEASE_CACHE === 'true'
+const SUPABASE_URL = process.env.SUPABASE_URL
+const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY
 const SUBSPLEASE_RSS_URL = 'https://subsplease.org/rss/?t&r=1080'
 const RELEASE_STATE_FILE =
   process.env.RELEASE_STATE_FILE ?? '.cache/todays-anime/releases.json'
 const RELEASE_STATE_RETENTION_SECONDS = 14 * 24 * 60 * 60
+const SETTINGS_TABLE = 'discord_notification_settings'
 
-const USERS = {
+const DEFAULT_USERS = {
   // maxSummaryPingBehindEpisodes and maxReleasePingBehindEpisodes control how far behind a watcher can be
   // and still get pinged for the morning summary or release alerts. null means always ping.
   Fried_Saanto: {
@@ -98,6 +101,59 @@ const USERS = {
     maxSummaryPingBehindEpisodes: null,
     maxReleasePingBehindEpisodes: null,
   },
+}
+
+let USERS = structuredClone(DEFAULT_USERS)
+
+async function fetchRemoteUserSettings() {
+  if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
+    return []
+  }
+
+  const url =
+    `${SUPABASE_URL}/rest/v1/${SETTINGS_TABLE}` +
+    '?select=discord_id,mal_username,username,display_name,ping_summary,ping_release,max_summary_ping_behind_episodes,max_release_ping_behind_episodes'
+
+  const res = await fetch(url, {
+    headers: {
+      apikey: SUPABASE_SECRET_KEY,
+      Authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
+    },
+  })
+  assertOk(res, 'Failed to fetch remote user settings')
+
+  return res.json()
+}
+
+function applyRemoteUserSettings(settingsRows) {
+  if (!Array.isArray(settingsRows) || !settingsRows.length) {
+    return
+  }
+
+  const remoteUsers = {}
+  for (const row of settingsRows) {
+    const malUsername = row.mal_username ?? row.username
+    if (!malUsername || !row.discord_id) {
+      continue
+    }
+
+    remoteUsers[malUsername] = {
+      discordId: row.discord_id,
+      displayName: row.display_name ?? malUsername,
+      pingSummary: row.ping_summary ?? true,
+      pingRelease: row.ping_release ?? true,
+      maxSummaryPingBehindEpisodes:
+        row.max_summary_ping_behind_episodes == null
+          ? null
+          : row.max_summary_ping_behind_episodes,
+      maxReleasePingBehindEpisodes:
+        row.max_release_ping_behind_episodes == null
+          ? null
+          : row.max_release_ping_behind_episodes,
+    }
+  }
+
+  USERS = Object.keys(remoteUsers).length ? remoteUsers : structuredClone(DEFAULT_USERS)
 }
 
 // ─── AniList ──────────────────────────────────────────────────────────────────
@@ -419,10 +475,10 @@ function shouldPingUser(username, mode) {
 
 function getViewerLabels(usernames, mode) {
   return usernames.map((username) => {
-    const { discordId } = USERS[username]
+    const { discordId, displayName } = USERS[username]
     return shouldPingUser(username, mode) && discordId
       ? `<@${discordId}>`
-      : username
+      : displayName || username
   })
 }
 
@@ -454,10 +510,10 @@ function shouldPingSummaryMention(anime, username, watchlistMap) {
 
 function getSummaryViewerLabels(anime, usernames, watchlistMap) {
   return usernames.map((username) => {
-    const { discordId } = USERS[username]
+    const { discordId, displayName } = USERS[username]
     return shouldPingSummaryMention(anime, username, watchlistMap) && discordId
       ? `<@${discordId}>`
-      : username
+      : displayName || username
   })
 }
 
@@ -489,6 +545,10 @@ function getReleasePingMentions(anime, usernames, watchlistMap) {
 
 function getMalUpdateLink(malId) {
   return `https://myanimelist.net/ownlist/anime/${malId}/edit?hideLayout=0`
+}
+
+function getReleaseDescription(sectionTitle, releasedAt) {
+  return [sectionTitle, `Released: <t:${releasedAt}:R>`].join('\n')
 }
 
 function formatBehindIndicator(watchedEpisodes, currentEpisode) {
@@ -676,7 +736,7 @@ function createReleaseEntry(anime, usernames, sectionTitle, watchlistMap) {
     embed: {
       title: `${anime.title} (ep. ${anime.episode})`,
       url: getMalUpdateLink(anime.malId),
-      description: `${sectionTitle}\nReleased: <t:${anime.release.releasedAt}:R>`,
+      description: getReleaseDescription(sectionTitle, anime.release.releasedAt),
       color: toDiscordColor(anime.coverImageColor) ?? 0x5865f2,
       thumbnail: anime.coverImage ? { url: anime.coverImage } : undefined,
       timestamp: new Date(anime.release.releasedAt * 1000).toISOString(),
@@ -761,6 +821,8 @@ async function sendToDiscord(payload) {
 
 async function main() {
   const nowTimestamp = Math.floor(Date.now() / 1000)
+  const remoteUserSettings = await fetchRemoteUserSettings()
+  applyRemoteUserSettings(remoteUserSettings)
   const [airingToday, watchlistMap] = await Promise.all([
     fetchTodaysAiring(),
     fetchAllUserWatchlists(),

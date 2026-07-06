@@ -39,6 +39,8 @@ jobs:
           NOTIFICATION_MODE: release
           IGNORE_RELEASE_CACHE: ${{ inputs.ignore_cache }}
           RELEASE_STATE_FILE: .cache/todays-anime/releases.json
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
 
       - uses: actions/cache/save@v4
         if: always()
