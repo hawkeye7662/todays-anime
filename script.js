@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK
 const MAL_CLIENT_ID = process.env.MAL_CLIENT_ID
 const NOTIFICATION_MODE = process.env.NOTIFICATION_MODE ?? 'summary'
+const IGNORE_RELEASE_CACHE = process.env.IGNORE_RELEASE_CACHE === 'true'
 const SUBSPLEASE_RSS_URL = 'https://subsplease.org/rss/?t&r=1080'
 const RELEASE_STATE_FILE =
   process.env.RELEASE_STATE_FILE ?? '.cache/todays-anime/releases.json'
@@ -516,23 +517,31 @@ async function main() {
   )
   const releasedWatching = attachReleaseInfo(watching, recentReleases)
   const releasedPtw = attachReleaseInfo(ptw, recentReleases)
-  const newWatching = filterUnnotifiedAnime(releasedWatching, notifiedReleaseKeys)
-  const newPtw = filterUnnotifiedAnime(releasedPtw, notifiedReleaseKeys)
+  const newWatching = IGNORE_RELEASE_CACHE
+    ? releasedWatching
+    : filterUnnotifiedAnime(releasedWatching, notifiedReleaseKeys)
+  const newPtw = IGNORE_RELEASE_CACHE
+    ? releasedPtw
+    : filterUnnotifiedAnime(releasedPtw, notifiedReleaseKeys)
   const payloads = createReleasePayloads(newWatching, newPtw, watchlistMap)
 
   if (!payloads.length) {
     console.log('No new released episodes to notify.')
-    await saveReleaseState(releaseState, nowTimestamp)
+    if (!IGNORE_RELEASE_CACHE) {
+      await saveReleaseState(releaseState, nowTimestamp)
+    }
     return
   }
 
   for (const payload of payloads) {
     await sendToDiscord(payload)
   }
-  await saveReleaseState(
-    extendReleaseState(releaseState, [...newWatching, ...newPtw]),
-    nowTimestamp,
-  )
+  if (!IGNORE_RELEASE_CACHE) {
+    await saveReleaseState(
+      extendReleaseState(releaseState, [...newWatching, ...newPtw]),
+      nowTimestamp,
+    )
+  }
 }
 
 main().catch(console.error)

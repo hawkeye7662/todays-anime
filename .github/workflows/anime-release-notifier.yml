@@ -2,6 +2,12 @@ name: Anime Release Notifier
 
 on:
   workflow_dispatch:
+    inputs:
+      ignore_cache:
+        description: Resend all currently matched released episodes without using or updating the cache
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: todays-anime-release-notifier
@@ -31,6 +37,7 @@ jobs:
           MAL_CLIENT_ID: ${{ secrets.MAL_CLIENT_ID }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           NOTIFICATION_MODE: release
+          IGNORE_RELEASE_CACHE: ${{ inputs.ignore_cache }}
           RELEASE_STATE_FILE: .cache/todays-anime/releases.json
 
       - uses: actions/cache/save@v4
