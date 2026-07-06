@@ -112,7 +112,7 @@ async function fetchRemoteUserSettings() {
 
   const url =
     `${SUPABASE_URL}/rest/v1/${SETTINGS_TABLE}` +
-    '?select=discord_id,mal_username,username,display_name,ping_summary,ping_release,max_summary_ping_behind_episodes,max_release_ping_behind_episodes'
+    '?select=discord_id,mal_username,display_name,ping_summary,ping_release,max_summary_ping_behind_episodes,max_release_ping_behind_episodes'
 
   const res = await fetch(url, {
     headers: {
@@ -132,7 +132,7 @@ function applyRemoteUserSettings(settingsRows) {
 
   const remoteUsers = {}
   for (const row of settingsRows) {
-    const malUsername = row.mal_username ?? row.username
+    const malUsername = row.mal_username
     if (!malUsername || !row.discord_id) {
       continue
     }
