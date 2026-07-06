@@ -21,3 +21,4 @@ jobs:
         env:
           MAL_CLIENT_ID: ${{ secrets.MAL_CLIENT_ID }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          NOTIFICATION_MODE: summary

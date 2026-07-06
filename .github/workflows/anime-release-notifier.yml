@@ -1,0 +1,38 @@
+name: Anime Release Notifier
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - run: npm ci
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: .cache/todays-anime
+          key: todays-anime-state-${{ github.run_id }}
+          restore-keys: |
+            todays-anime-state-
+
+      - run: node script.js
+        env:
+          MAL_CLIENT_ID: ${{ secrets.MAL_CLIENT_ID }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          NOTIFICATION_MODE: release
+          RELEASE_STATE_FILE: .cache/todays-anime/releases.json
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .cache/todays-anime
+          key: todays-anime-state-${{ github.run_id }}
