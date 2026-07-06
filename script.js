@@ -41,6 +41,7 @@ const AIRING_QUERY = `
           idMal
           title { english romaji }
           synonyms
+          coverImage { large color }
         }
       }
     }
@@ -291,6 +292,31 @@ function extendReleaseState(state, animeList) {
   return { notifiedReleases }
 }
 
+function chunkArray(items, chunkSize) {
+  const chunks = []
+
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize))
+  }
+
+  return chunks
+}
+
+function toDiscordColor(color) {
+  if (!color?.startsWith('#')) {
+    return null
+  }
+
+  return Number.parseInt(color.slice(1), 16)
+}
+
+function getViewerLabels(usernames) {
+  return usernames.map((username) => {
+    const { discordId, ping } = USERS[username]
+    return ping && discordId ? `<@${discordId}>` : username
+  })
+}
+
 async function fetchTodaysAiring() {
   const now = new Date()
   const startOfDay = Date.UTC(
@@ -332,6 +358,8 @@ async function fetchTodaysAiring() {
         titleEnglish: entry.media.title.english,
         titleRomaji: entry.media.title.romaji,
         synonyms: entry.media.synonyms,
+        coverImage: entry.media.coverImage.large,
+        coverImageColor: entry.media.coverImage.color,
         episode: entry.episode,
         airingAt: entry.airingAt,
       })
@@ -388,10 +416,7 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
   const lines = ["# Today's Anime"]
 
   for (const anime of watching) {
-    const viewers = watchlistMap.get(anime.malId).watchers.map((username) => {
-      const { discordId, ping } = USERS[username]
-      return ping && discordId ? `<@${discordId}>` : username
-    })
+    const viewers = getViewerLabels(watchlistMap.get(anime.malId).watchers)
     lines.push(`## ${anime.title} (ep. ${anime.episode})`)
     lines.push(`Viewers: ${viewers.join(', ')}`)
     lines.push(`Time: <t:${anime.airingAt}>`)
@@ -401,10 +426,7 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
     lines.push(`\n## 📋 Plan to Watch`)
 
     for (const anime of ptw) {
-      const viewers = watchlistMap.get(anime.malId).ptwers.map((username) => {
-        const { discordId, ping } = USERS[username]
-        return ping && discordId ? `<@${discordId}>` : username
-      })
+      const viewers = getViewerLabels(watchlistMap.get(anime.malId).ptwers)
       lines.push(`### ${anime.title}`)
       lines.push(`Viewers: ${viewers.join(', ')}`)
       lines.push(`Time: <t:${anime.airingAt}>`)
@@ -414,49 +436,56 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
   return lines.join('\n')
 }
 
-function formatReleaseMessage(watching, ptw, watchlistMap) {
-  if (!watching.length && !ptw.length) {
-    return null
+function createReleaseEntry(anime, usernames, sectionTitle) {
+  const viewers = getViewerLabels(usernames)
+
+  return {
+    content: `**${anime.title}** ${viewers.join(' ')}`.trim(),
+    embed: {
+      title: `${anime.title} (ep. ${anime.episode})`,
+      description: `${sectionTitle}\nReleased: <t:${anime.release.releasedAt}:R>`,
+      color: toDiscordColor(anime.coverImageColor) ?? 0x5865f2,
+      thumbnail: anime.coverImage ? { url: anime.coverImage } : undefined,
+      timestamp: new Date(anime.release.releasedAt * 1000).toISOString(),
+    },
   }
-
-  const lines = ['# Episodes Out Now']
-
-  for (const anime of watching) {
-    const viewers = watchlistMap.get(anime.malId).watchers.map((username) => {
-      const { discordId, ping } = USERS[username]
-      return ping && discordId ? `<@${discordId}>` : username
-    })
-    lines.push(`## ${anime.title} (ep. ${anime.episode})`)
-    lines.push(`Viewers: ${viewers.join(', ')}`)
-    lines.push(`Scheduled: <t:${anime.airingAt}>`)
-    lines.push(`Released: <t:${anime.release.releasedAt}>`)
-    lines.push(`Source: [Torrent](${anime.release.link})`)
-  }
-
-  if (ptw.length) {
-    lines.push(`\n## 📋 Plan to Watch`)
-
-    for (const anime of ptw) {
-      const viewers = watchlistMap.get(anime.malId).ptwers.map((username) => {
-        const { discordId, ping } = USERS[username]
-        return ping && discordId ? `<@${discordId}>` : username
-      })
-      lines.push(`### ${anime.title}`)
-      lines.push(`Viewers: ${viewers.join(', ')}`)
-      lines.push(`Scheduled: <t:${anime.airingAt}>`)
-      lines.push(`Released: <t:${anime.release.releasedAt}>`)
-      lines.push(`Source: [Torrent](${anime.release.link})`)
-    }
-  }
-
-  return lines.join('\n')
 }
 
-async function sendToDiscord(content) {
+function createReleasePayloads(watching, ptw, watchlistMap) {
+  const entries = [
+    ...watching.map((anime) =>
+      createReleaseEntry(
+        anime,
+        watchlistMap.get(anime.malId).watchers,
+        'Episode out now',
+      ),
+    ),
+    ...ptw.map((anime) =>
+      createReleaseEntry(
+        anime,
+        watchlistMap.get(anime.malId).ptwers,
+        'Plan to watch premiere out now',
+      ),
+    ),
+  ]
+
+  if (!entries.length) {
+    return []
+  }
+
+  return chunkArray(entries, 10).map((chunk) => ({
+    content: chunk.map((entry) => entry.content).join('\n'),
+    embeds: chunk.map((entry) => entry.embed),
+  }))
+}
+
+async function sendToDiscord(payload) {
   const res = await fetch(DISCORD_WEBHOOK, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(
+      typeof payload === 'string' ? { content: payload } : payload,
+    ),
   })
   assertOk(res, 'Failed to send Discord webhook')
 }
@@ -489,15 +518,17 @@ async function main() {
   const releasedPtw = attachReleaseInfo(ptw, recentReleases)
   const newWatching = filterUnnotifiedAnime(releasedWatching, notifiedReleaseKeys)
   const newPtw = filterUnnotifiedAnime(releasedPtw, notifiedReleaseKeys)
-  const message = formatReleaseMessage(newWatching, newPtw, watchlistMap)
+  const payloads = createReleasePayloads(newWatching, newPtw, watchlistMap)
 
-  if (!message) {
+  if (!payloads.length) {
     console.log('No new released episodes to notify.')
     await saveReleaseState(releaseState, nowTimestamp)
     return
   }
 
-  await sendToDiscord(message)
+  for (const payload of payloads) {
+    await sendToDiscord(payload)
+  }
   await saveReleaseState(
     extendReleaseState(releaseState, [...newWatching, ...newPtw]),
     nowTimestamp,
