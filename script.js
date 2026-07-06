@@ -430,7 +430,7 @@ function formatReleaseMessage(watching, ptw, watchlistMap) {
     lines.push(`Viewers: ${viewers.join(', ')}`)
     lines.push(`Scheduled: <t:${anime.airingAt}>`)
     lines.push(`Released: <t:${anime.release.releasedAt}>`)
-    lines.push(`Source: ${anime.release.link}`)
+    lines.push(`Source: [Torrent](${anime.release.link})`)
   }
 
   if (ptw.length) {
@@ -445,7 +445,7 @@ function formatReleaseMessage(watching, ptw, watchlistMap) {
       lines.push(`Viewers: ${viewers.join(', ')}`)
       lines.push(`Scheduled: <t:${anime.airingAt}>`)
       lines.push(`Released: <t:${anime.release.releasedAt}>`)
-      lines.push(`Source: ${anime.release.link}`)
+      lines.push(`Source: [Torrent](${anime.release.link})`)
     }
   }
 
