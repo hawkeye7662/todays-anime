@@ -543,6 +543,11 @@ function getReleasePingMentions(anime, usernames, watchlistMap) {
   })
 }
 
+function getReleaseEmbedViewerLabel(username) {
+  const { discordId, displayName } = USERS[username]
+  return discordId ? `<@${discordId}>` : displayName || username
+}
+
 function getMalUpdateLink(malId) {
   return `https://myanimelist.net/ownlist/anime/${malId}/edit?hideLayout=0`
 }
@@ -580,7 +585,7 @@ function formatWatchingViewerLines(anime, usernames, watchlistMap) {
   const { watcherProgress } = watchlistMap.get(anime.malId)
 
   return usernames.map((username) => {
-    const viewer = getViewerLabels([username], 'release')[0]
+    const viewer = getReleaseEmbedViewerLabel(username)
     const behindIndicator = formatBehindIndicator(
       watcherProgress[username],
       anime.episode,
@@ -591,7 +596,9 @@ function formatWatchingViewerLines(anime, usernames, watchlistMap) {
 }
 
 function formatPtwViewerLines(anime, usernames, watchlistMap) {
-  return getViewerLabels(watchlistMap.get(anime.malId).ptwers, 'release')
+  return watchlistMap
+    .get(anime.malId)
+    .ptwers.map((username) => getReleaseEmbedViewerLabel(username))
 }
 
 function withReleaseFields(entry, fields) {
