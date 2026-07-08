@@ -172,7 +172,13 @@ const AIRING_QUERY = `
           idMal
           title { english romaji }
           synonyms
+          episodes
+          source
+          genres
+          bannerImage
           coverImage { large color }
+          studios { nodes { name } }
+          trailer { id site }
         }
       }
     }
@@ -556,8 +562,78 @@ function getMalAnimeLink(malId) {
   return `https://myanimelist.net/anime/${malId}`
 }
 
+function isFinale(anime) {
+  return (
+    Number.isFinite(anime.totalEpisodes) &&
+    anime.totalEpisodes > 0 &&
+    anime.episode === anime.totalEpisodes
+  )
+}
+
+function getFinaleLabel(anime) {
+  return isFinale(anime) ? 'Finale' : null
+}
+
+function getTrailerUrl(trailer) {
+  if (!trailer?.id || !trailer?.site) {
+    return null
+  }
+
+  if (trailer.site.toLowerCase() === 'youtube') {
+    return `https://www.youtube.com/watch?v=${trailer.id}`
+  }
+
+  return null
+}
+
 function getReleaseDescription(sectionTitle, releasedAt) {
   return [sectionTitle, `Released: <t:${releasedAt}:R>`].join('\n')
+}
+
+function formatEnumLabel(value) {
+  if (!value) {
+    return null
+  }
+
+  return value
+    .toLowerCase()
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function formatEpisodeCount(anime) {
+  if (!Number.isFinite(anime.totalEpisodes) || anime.totalEpisodes <= 0) {
+    return null
+  }
+
+  return `${anime.totalEpisodes} episode${anime.totalEpisodes === 1 ? '' : 's'}`
+}
+
+function formatSummaryHeading(anime, prefix) {
+  const suffix = getFinaleLabel(anime) ? ' — Finale' : ''
+  return `${prefix} ${anime.title}${suffix}`
+}
+
+function getReleaseMetadataFields(anime) {
+  const studios = anime.studios?.length ? anime.studios.slice(0, 3).join(', ') : null
+  const source = formatEnumLabel(anime.source)
+  const episodeCount = formatEpisodeCount(anime)
+  const genres = anime.genres?.length ? anime.genres.slice(0, 3).join(', ') : null
+
+  return [
+    {
+      name: 'Details',
+      value: [
+        studios ? `**Studio:** ${studios}` : null,
+        source ? `**Source:** ${source}` : null,
+        episodeCount ? `**Episodes:** ${episodeCount}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    },
+    genres ? { name: 'Genres', value: genres } : null,
+  ].filter((field) => field?.value)
 }
 
 function formatBehindIndicator(watchedEpisodes, currentEpisode) {
@@ -611,6 +687,31 @@ function withReleaseFields(entry, fields) {
   }
 }
 
+function getTrailerButton(anime) {
+  if (anime.episode !== 1) {
+    return null
+  }
+
+  const trailerUrl = getTrailerUrl(anime.trailer)
+  if (!trailerUrl) {
+    return null
+  }
+
+  return {
+    type: 2,
+    style: 5,
+    label: `${anime.title.slice(0, 68)} PV`,
+    url: trailerUrl,
+  }
+}
+
+function buildActionRows(buttons) {
+  return chunkArray(buttons, 5).map((rowButtons) => ({
+    type: 1,
+    components: rowButtons,
+  }))
+}
+
 async function fetchTodaysAiring() {
   const now = new Date()
   const startOfDay = Date.UTC(
@@ -652,8 +753,14 @@ async function fetchTodaysAiring() {
         titleEnglish: entry.media.title.english,
         titleRomaji: entry.media.title.romaji,
         synonyms: entry.media.synonyms,
+        totalEpisodes: entry.media.episodes,
+        source: entry.media.source,
+        genres: entry.media.genres,
+        bannerImage: entry.media.bannerImage,
         coverImage: entry.media.coverImage.large,
         coverImageColor: entry.media.coverImage.color,
+        studios: entry.media.studios.nodes.map((studio) => studio.name),
+        trailer: entry.media.trailer,
         episode: entry.episode,
         airingAt: entry.airingAt,
       })
@@ -719,7 +826,7 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
       watchlistMap.get(anime.malId).watchers,
       watchlistMap,
     )
-    lines.push(`## ${anime.title} (ep. ${anime.episode})`)
+    lines.push(formatSummaryHeading(anime, `## ${anime.title} (ep. ${anime.episode})`))
     lines.push(`Viewers: ${viewers.join(', ')}`)
     lines.push(`Time: <t:${anime.airingAt}>`)
   }
@@ -732,7 +839,7 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
         watchlistMap.get(anime.malId).ptwers,
         'summary',
       )
-      lines.push(`### ${anime.title}`)
+      lines.push(formatSummaryHeading(anime, '###'))
       lines.push(`Viewers: ${viewers.join(', ')}`)
       lines.push(`Time: <t:${anime.airingAt}>`)
     }
@@ -744,12 +851,14 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
 function createReleaseEntry(anime, usernames, sectionTitle, watchlistMap) {
   return {
     mentions: getReleasePingMentions(anime, usernames, watchlistMap),
+    trailerButton: getTrailerButton(anime),
     embed: {
-      title: `${anime.title} (ep. ${anime.episode})`,
+      title: `${anime.title} (ep. ${anime.episode})${isFinale(anime) ? ' — Finale' : ''}`,
       url: getMalAnimeLink(anime.malId),
       description: getReleaseDescription(sectionTitle, anime.release.releasedAt),
       color: toDiscordColor(anime.coverImageColor) ?? 0x5865f2,
       thumbnail: anime.coverImage ? { url: anime.coverImage } : undefined,
+      image: anime.bannerImage ? { url: anime.bannerImage } : undefined,
       timestamp: new Date(anime.release.releasedAt * 1000).toISOString(),
     },
   }
@@ -762,7 +871,7 @@ function createReleasePayloads(watching, ptw, watchlistMap) {
         createReleaseEntry(
           anime,
           watchlistMap.get(anime.malId).watchers,
-          'Episode out now',
+          isFinale(anime) ? 'Episode out now • Finale' : 'Episode out now',
           watchlistMap,
         ),
         [
@@ -778,6 +887,7 @@ function createReleasePayloads(watching, ptw, watchlistMap) {
             name: 'MAL',
             value: `[Update your list](${getMalUpdateLink(anime.malId)})`,
           },
+          ...getReleaseMetadataFields(anime),
         ],
       ),
     ),
@@ -786,7 +896,9 @@ function createReleasePayloads(watching, ptw, watchlistMap) {
         createReleaseEntry(
           anime,
           watchlistMap.get(anime.malId).ptwers,
-          'Plan to watch premiere out now',
+          isFinale(anime)
+            ? 'Plan to watch premiere out now • Finale'
+            : 'Plan to watch premiere out now',
           watchlistMap,
         ),
         [
@@ -802,6 +914,7 @@ function createReleasePayloads(watching, ptw, watchlistMap) {
             name: 'MAL',
             value: `[Update your list](${getMalUpdateLink(anime.malId)})`,
           },
+          ...getReleaseMetadataFields(anime),
         ],
       ),
     ),
@@ -811,14 +924,26 @@ function createReleasePayloads(watching, ptw, watchlistMap) {
     return []
   }
 
-  return chunkArray(entries, 10).map((chunk) => ({
-    content: [...new Set(chunk.flatMap((entry) => entry.mentions))].join(' '),
-    embeds: chunk.map((entry) => entry.embed),
-  }))
+  return chunkArray(entries, 10).map((chunk) => {
+    const trailerButtons = chunk.flatMap((entry) =>
+      entry.trailerButton ? [entry.trailerButton] : [],
+    )
+
+    return {
+      content: [...new Set(chunk.flatMap((entry) => entry.mentions))].join(' '),
+      embeds: chunk.map((entry) => entry.embed),
+      ...(trailerButtons.length
+        ? { components: buildActionRows(trailerButtons) }
+        : {}),
+    }
+  })
 }
 
 async function sendToDiscord(payload) {
-  const res = await fetch(DISCORD_WEBHOOK, {
+  const webhookUrl = new URL(DISCORD_WEBHOOK)
+  webhookUrl.searchParams.set('with_components', 'true')
+
+  const res = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(
