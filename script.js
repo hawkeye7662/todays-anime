@@ -381,6 +381,32 @@ function getReleaseKey(anime) {
   return `${anime.malId}:${anime.episode}:${anime.release.releasedAt}`
 }
 
+function getAiringKey(anime) {
+  return `${anime.malId}:${anime.episode}`
+}
+
+function groupAnimeAudiences(watching, ptw, watchlistMap) {
+  const groups = new Map()
+
+  function addAudience(anime, audienceKey) {
+    const key = getAiringKey(anime)
+    const watchlistEntry = watchlistMap.get(anime.malId)
+
+    if (!groups.has(key)) {
+      groups.set(key, { anime, watchers: [], ptwers: [] })
+    }
+
+    groups.get(key)[audienceKey] = watchlistEntry?.[audienceKey]
+      ? [...watchlistEntry[audienceKey]]
+      : []
+  }
+
+  watching.forEach((anime) => addAudience(anime, 'watchers'))
+  ptw.forEach((anime) => addAudience(anime, 'ptwers'))
+
+  return [...groups.values()].sort((a, b) => a.anime.airingAt - b.anime.airingAt)
+}
+
 function pruneReleaseState(state, nowTimestamp) {
   const cutoff = nowTimestamp - RELEASE_STATE_RETENTION_SECONDS
 
@@ -418,12 +444,6 @@ async function saveReleaseState(state, nowTimestamp) {
   const prunedState = pruneReleaseState(state, nowTimestamp)
   await mkdir(dirname(RELEASE_STATE_FILE), { recursive: true })
   await writeFile(RELEASE_STATE_FILE, JSON.stringify(prunedState, null, 2))
-}
-
-function filterUnnotifiedAnime(animeList, notifiedReleaseKeys) {
-  return animeList.filter(
-    (anime) => !notifiedReleaseKeys.has(getReleaseKey(anime)),
-  )
 }
 
 function extendReleaseState(state, animeList) {
@@ -613,6 +633,27 @@ function formatEpisodeCount(anime) {
 function formatSummaryHeading(anime, prefix) {
   const suffix = getFinaleLabel(anime) ? ' — Finale' : ''
   return `${prefix} ${anime.title}${suffix}`
+}
+
+function formatWatchingSummaryHeading(anime) {
+  const suffix = getFinaleLabel(anime) ? ' — Finale' : ''
+  return `## ${anime.title} (ep. ${anime.episode})${suffix}`
+}
+
+function getReleaseSectionTitle(group) {
+  const { anime, watchers, ptwers } = group
+
+  if (watchers.length && ptwers.length && anime.episode === 1) {
+    return isFinale(anime) ? 'Premiere out now • Finale' : 'Premiere out now'
+  }
+
+  if (watchers.length) {
+    return isFinale(anime) ? 'Episode out now • Finale' : 'Episode out now'
+  }
+
+  return isFinale(anime)
+    ? 'Plan to watch premiere out now • Finale'
+    : 'Plan to watch premiere out now'
 }
 
 function getReleaseMetadataFields(anime) {
@@ -813,32 +854,38 @@ async function fetchAllUserWatchlists() {
 
 // ─── Format & send ────────────────────────────────────────────────────────────
 
-function formatSummaryMessage(watching, ptw, watchlistMap) {
-  if (!watching.length && !ptw.length) {
+function formatSummaryMessage(groups, watchlistMap) {
+  if (!groups.length) {
     return "# Today's Anime\nNo anime airing today 😔"
   }
 
   const lines = ["# Today's Anime"]
+  const watchingGroups = groups.filter((group) => group.watchers.length)
+  const ptwOnlyGroups = groups.filter(
+    (group) => !group.watchers.length && group.ptwers.length,
+  )
 
-  for (const anime of watching) {
+  for (const group of watchingGroups) {
+    const { anime, watchers, ptwers } = group
     const viewers = getSummaryViewerLabels(
       anime,
-      watchlistMap.get(anime.malId).watchers,
+      watchers,
       watchlistMap,
     )
-    lines.push(formatSummaryHeading(anime, `## ${anime.title} (ep. ${anime.episode})`))
+    lines.push(formatWatchingSummaryHeading(anime))
     lines.push(`Viewers: ${viewers.join(', ')}`)
+    if (ptwers.length) {
+      lines.push(`Plan to Watch: ${getViewerLabels(ptwers, 'summary').join(', ')}`)
+    }
     lines.push(`Time: <t:${anime.airingAt}>`)
   }
 
-  if (ptw.length) {
+  if (ptwOnlyGroups.length) {
     lines.push(`\n## 📋 Plan to Watch`)
 
-    for (const anime of ptw) {
-      const viewers = getViewerLabels(
-        watchlistMap.get(anime.malId).ptwers,
-        'summary',
-      )
+    for (const group of ptwOnlyGroups) {
+      const { anime, ptwers } = group
+      const viewers = getViewerLabels(ptwers, 'summary')
       lines.push(formatSummaryHeading(anime, '###'))
       lines.push(`Viewers: ${viewers.join(', ')}`)
       lines.push(`Time: <t:${anime.airingAt}>`)
@@ -848,14 +895,21 @@ function formatSummaryMessage(watching, ptw, watchlistMap) {
   return lines.join('\n')
 }
 
-function createReleaseEntry(anime, usernames, sectionTitle, watchlistMap) {
+function createReleaseEntry(group, watchlistMap) {
+  const { anime, watchers, ptwers } = group
   return {
-    mentions: getReleasePingMentions(anime, usernames, watchlistMap),
+    mentions: [
+      ...getReleasePingMentions(anime, watchers, watchlistMap),
+      ...getReleasePingMentions(anime, ptwers, watchlistMap),
+    ],
     trailerButton: getTrailerButton(anime),
     embed: {
       title: `${anime.title} (ep. ${anime.episode})${isFinale(anime) ? ' — Finale' : ''}`,
       url: getMalAnimeLink(anime.malId),
-      description: getReleaseDescription(sectionTitle, anime.release.releasedAt),
+      description: getReleaseDescription(
+        getReleaseSectionTitle(group),
+        anime.release.releasedAt,
+      ),
       color: toDiscordColor(anime.coverImageColor) ?? 0x5865f2,
       thumbnail: anime.coverImage ? { url: anime.coverImage } : undefined,
       image: anime.bannerImage ? { url: anime.bannerImage } : undefined,
@@ -864,61 +918,35 @@ function createReleaseEntry(anime, usernames, sectionTitle, watchlistMap) {
   }
 }
 
-function createReleasePayloads(watching, ptw, watchlistMap) {
-  const entries = [
-    ...watching.map((anime) =>
-      withReleaseFields(
-        createReleaseEntry(
-          anime,
-          watchlistMap.get(anime.malId).watchers,
-          isFinale(anime) ? 'Episode out now • Finale' : 'Episode out now',
-          watchlistMap,
-        ),
-        [
-          {
-            name: 'Viewers',
-            value: formatWatchingViewerLines(
-              anime,
-              watchlistMap.get(anime.malId).watchers,
-              watchlistMap,
-            ).join('\n'),
-          },
-          {
-            name: 'MAL',
-            value: `[Update your list](${getMalUpdateLink(anime.malId)})`,
-          },
-          ...getReleaseMetadataFields(anime),
-        ],
-      ),
-    ),
-    ...ptw.map((anime) =>
-      withReleaseFields(
-        createReleaseEntry(
-          anime,
-          watchlistMap.get(anime.malId).ptwers,
-          isFinale(anime)
-            ? 'Plan to watch premiere out now • Finale'
-            : 'Plan to watch premiere out now',
-          watchlistMap,
-        ),
-        [
-          {
-            name: 'Viewers',
-            value: formatPtwViewerLines(
-              anime,
-              watchlistMap.get(anime.malId).ptwers,
-              watchlistMap,
-            ).join('\n'),
-          },
-          {
-            name: 'MAL',
-            value: `[Update your list](${getMalUpdateLink(anime.malId)})`,
-          },
-          ...getReleaseMetadataFields(anime),
-        ],
-      ),
-    ),
-  ]
+function createReleasePayloads(groups, watchlistMap) {
+  const entries = groups.map((group) => {
+    const { anime, watchers, ptwers } = group
+
+    return withReleaseFields(
+      createReleaseEntry(group, watchlistMap),
+      [
+        watchers.length
+          ? {
+              name: 'Viewers',
+              value: formatWatchingViewerLines(anime, watchers, watchlistMap).join(
+                '\n',
+              ),
+            }
+          : null,
+        ptwers.length
+          ? {
+              name: watchers.length ? 'Plan to Watch' : 'Viewers',
+              value: formatPtwViewerLines(anime, ptwers, watchlistMap).join('\n'),
+            }
+          : null,
+        {
+          name: 'MAL',
+          value: `[Update your list](${getMalUpdateLink(anime.malId)})`,
+        },
+        ...getReleaseMetadataFields(anime),
+      ].filter(Boolean),
+    )
+  })
 
   if (!entries.length) {
     return []
@@ -964,9 +992,10 @@ async function main() {
     fetchAllUserWatchlists(),
   ])
   const { watching, ptw } = getRelevantAnime(airingToday, watchlistMap)
+  const groupedAnime = groupAnimeAudiences(watching, ptw, watchlistMap)
 
   if (NOTIFICATION_MODE === 'summary') {
-    await sendToDiscord(formatSummaryMessage(watching, ptw, watchlistMap))
+    await sendToDiscord(formatSummaryMessage(groupedAnime, watchlistMap))
     return
   }
 
@@ -981,13 +1010,17 @@ async function main() {
   )
   const releasedWatching = attachReleaseInfo(watching, recentReleases)
   const releasedPtw = attachReleaseInfo(ptw, recentReleases)
-  const newWatching = IGNORE_RELEASE_CACHE
-    ? releasedWatching
-    : filterUnnotifiedAnime(releasedWatching, notifiedReleaseKeys)
-  const newPtw = IGNORE_RELEASE_CACHE
-    ? releasedPtw
-    : filterUnnotifiedAnime(releasedPtw, notifiedReleaseKeys)
-  const payloads = createReleasePayloads(newWatching, newPtw, watchlistMap)
+  const releasedGroups = groupAnimeAudiences(
+    releasedWatching,
+    releasedPtw,
+    watchlistMap,
+  )
+  const newReleasedGroups = IGNORE_RELEASE_CACHE
+    ? releasedGroups
+    : releasedGroups.filter(
+        (group) => !notifiedReleaseKeys.has(getReleaseKey(group.anime)),
+      )
+  const payloads = createReleasePayloads(newReleasedGroups, watchlistMap)
 
   if (!payloads.length) {
     console.log('No new released episodes to notify.')
@@ -1002,7 +1035,10 @@ async function main() {
   }
   if (!IGNORE_RELEASE_CACHE) {
     await saveReleaseState(
-      extendReleaseState(releaseState, [...newWatching, ...newPtw]),
+      extendReleaseState(
+        releaseState,
+        newReleasedGroups.map((group) => group.anime),
+      ),
       nowTimestamp,
     )
   }
