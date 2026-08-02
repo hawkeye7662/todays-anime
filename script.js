@@ -897,23 +897,31 @@ function formatSummaryMessage(groups, watchlistMap) {
 
 function createReleaseEntry(group, watchlistMap) {
   const { anime, watchers, ptwers } = group
+  const isPremiere = anime.episode === 1
+
   return {
     mentions: [
       ...getReleasePingMentions(anime, watchers, watchlistMap),
       ...getReleasePingMentions(anime, ptwers, watchlistMap),
     ],
-    trailerButton: getTrailerButton(anime),
+    trailerButton: isPremiere ? getTrailerButton(anime) : null,
     embed: {
-      title: `${anime.title} (ep. ${anime.episode})${isFinale(anime) ? ' — Finale' : ''}`,
-      url: getMalAnimeLink(anime.malId),
-      description: getReleaseDescription(
-        getReleaseSectionTitle(group),
-        anime.release.releasedAt,
-      ),
+      title: isPremiere
+        ? `${anime.title} (ep. ${anime.episode})${isFinale(anime) ? ' — Finale' : ''}`
+        : anime.title,
+      ...(isPremiere
+        ? {
+            url: getMalAnimeLink(anime.malId),
+            description: getReleaseDescription(
+              getReleaseSectionTitle(group),
+              anime.release.releasedAt,
+            ),
+            image: anime.bannerImage ? { url: anime.bannerImage } : undefined,
+            timestamp: new Date(anime.release.releasedAt * 1000).toISOString(),
+          }
+        : {}),
       color: toDiscordColor(anime.coverImageColor) ?? 0x5865f2,
       thumbnail: anime.coverImage ? { url: anime.coverImage } : undefined,
-      image: anime.bannerImage ? { url: anime.bannerImage } : undefined,
-      timestamp: new Date(anime.release.releasedAt * 1000).toISOString(),
     },
   }
 }
@@ -939,11 +947,15 @@ function createReleasePayloads(groups, watchlistMap) {
               value: formatPtwViewerLines(anime, ptwers, watchlistMap).join('\n'),
             }
           : null,
-        {
-          name: 'MAL',
-          value: `[Update your list](${getMalUpdateLink(anime.malId)})`,
-        },
-        ...getReleaseMetadataFields(anime),
+        ...(anime.episode === 1
+          ? [
+              {
+                name: 'MAL',
+                value: `[Update your list](${getMalUpdateLink(anime.malId)})`,
+              },
+              ...getReleaseMetadataFields(anime),
+            ]
+          : []),
       ].filter(Boolean),
     )
   })
