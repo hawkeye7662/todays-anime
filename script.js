@@ -12,6 +12,7 @@ const SUBSPLEASE_RSS_URL = 'https://subsplease.org/rss/?t&r=1080'
 const RELEASE_STATE_FILE =
   process.env.RELEASE_STATE_FILE ?? '.cache/todays-anime/releases.json'
 const RELEASE_STATE_RETENTION_SECONDS = 14 * 24 * 60 * 60
+const EPISODE_NUMBER_FALLBACK_WINDOW_SECONDS = 6 * 60 * 60
 const SETTINGS_TABLE = 'discord_notification_settings'
 
 const DEFAULT_USERS = {
@@ -247,9 +248,17 @@ function titleMatches(candidateTitle, releaseTitle) {
   }
 
   const releaseWordSet = new Set(releaseWords)
+  const candidateWordSet = new Set(candidateWords)
   const overlap = overlapCount(candidateWords, releaseWordSet)
 
   if (candidateWords.every((word) => releaseWordSet.has(word))) {
+    return true
+  }
+
+  if (
+    releaseWords.length >= 3 &&
+    releaseWords.every((word) => candidateWordSet.has(word))
+  ) {
     return true
   }
 
@@ -350,7 +359,7 @@ function getRelevantAnime(airingToday, watchlistMap) {
   return { relevant, watching, ptw }
 }
 
-function findMatchingRelease(anime, releases) {
+function findMatchingRelease(anime, releases, nowTimestamp) {
   const candidates = buildTitleCandidates(anime)
 
   for (const candidate of candidates) {
@@ -365,13 +374,23 @@ function findMatchingRelease(anime, releases) {
     }
   }
 
-  return null
+  const episodeNumberFallbacks = releases.filter(
+    (release) =>
+      release.releasedAt <= nowTimestamp &&
+      release.releasedAt >=
+        anime.airingAt - EPISODE_NUMBER_FALLBACK_WINDOW_SECONDS &&
+      candidates.some((candidate) =>
+        titleMatches(candidate, release.releaseTitle),
+      ),
+  )
+
+  return episodeNumberFallbacks.length === 1 ? episodeNumberFallbacks[0] : null
 }
 
-function attachReleaseInfo(animeList, releases) {
+function attachReleaseInfo(animeList, releases, nowTimestamp) {
   return animeList
     .map((anime) => {
-      const release = findMatchingRelease(anime, releases)
+      const release = findMatchingRelease(anime, releases, nowTimestamp)
       return release ? { ...anime, release } : null
     })
     .filter(Boolean)
@@ -909,9 +928,9 @@ function createReleaseEntry(group, watchlistMap) {
       title: isPremiere
         ? `${anime.title} (ep. ${anime.episode})${isFinale(anime) ? ' — Finale' : ''}`
         : anime.title,
+      url: getMalAnimeLink(anime.malId),
       ...(isPremiere
         ? {
-            url: getMalAnimeLink(anime.malId),
             description: getReleaseDescription(
               getReleaseSectionTitle(group),
               anime.release.releasedAt,
@@ -1020,8 +1039,12 @@ async function main() {
   const notifiedReleaseKeys = new Set(
     releaseState.notifiedReleases.map((entry) => entry.key),
   )
-  const releasedWatching = attachReleaseInfo(watching, recentReleases)
-  const releasedPtw = attachReleaseInfo(ptw, recentReleases)
+  const releasedWatching = attachReleaseInfo(
+    watching,
+    recentReleases,
+    nowTimestamp,
+  )
+  const releasedPtw = attachReleaseInfo(ptw, recentReleases, nowTimestamp)
   const releasedGroups = groupAnimeAudiences(
     releasedWatching,
     releasedPtw,
@@ -1056,4 +1079,11 @@ async function main() {
   }
 }
 
-main().catch(console.error)
+export { findMatchingRelease, titleMatches }
+
+if (
+  process.argv[1] &&
+  import.meta.url === new URL(process.argv[1], 'file:').href
+) {
+  main().catch(console.error)
+}
