@@ -14,6 +14,7 @@ const RELEASE_STATE_FILE =
 const RELEASE_STATE_RETENTION_SECONDS = 14 * 24 * 60 * 60
 const EPISODE_NUMBER_FALLBACK_WINDOW_SECONDS = 6 * 60 * 60
 const SETTINGS_TABLE = 'discord_notification_settings'
+const MAL_SCHEDULE_FALLBACK_URL = 'https://today.hzwk.workers.dev/'
 
 const DEFAULT_USERS = {
   // maxSummaryPingBehindEpisodes and maxReleasePingBehindEpisodes control how far behind a watcher can be
@@ -656,7 +657,10 @@ function formatSummaryHeading(anime, prefix) {
 
 function formatWatchingSummaryHeading(anime) {
   const suffix = getFinaleLabel(anime) ? ' — Finale' : ''
-  return `## ${anime.title} (ep. ${anime.episode})${suffix}`
+  const episode = Number.isFinite(anime.episode)
+    ? ` (ep. ${anime.episode})`
+    : ''
+  return `## ${anime.title}${episode}${suffix}`
 }
 
 function getReleaseSectionTitle(group) {
@@ -772,8 +776,7 @@ function buildActionRows(buttons) {
   }))
 }
 
-async function fetchTodaysAiring() {
-  const now = new Date()
+async function fetchTodaysAiring(now = new Date(), request = fetch) {
   const startOfDay = Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
@@ -784,11 +787,30 @@ async function fetchTodaysAiring() {
   const start = Math.floor(startOfDay / 1000)
   const end = Math.floor(endOfDay / 1000)
 
+  try {
+    return await fetchAniListAiring(start, end, request)
+  } catch (anilistError) {
+    console.warn(
+      `AniList airing schedule failed; falling back to MAL schedule: ${anilistError.message}`,
+    )
+
+    try {
+      return await fetchMalScheduleFallback(request)
+    } catch (malError) {
+      throw new AggregateError(
+        [anilistError, malError],
+        'Failed to fetch airing schedule from AniList and MAL fallback',
+      )
+    }
+  }
+}
+
+async function fetchAniListAiring(start, end, request = fetch) {
   const results = []
   let page = 1
 
   while (true) {
-    const res = await fetch(ANILIST_URL, {
+    const res = await request(ANILIST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -831,6 +853,44 @@ async function fetchTodaysAiring() {
   }
 
   return results
+}
+
+async function fetchMalScheduleFallback(request = fetch) {
+  const res = await request(MAL_SCHEDULE_FALLBACK_URL)
+  assertOk(res, 'Failed to fetch MAL fallback airing schedule')
+
+  const data = await res.json()
+  if (!Array.isArray(data?.today)) {
+    throw new Error('MAL fallback returned an invalid airing schedule')
+  }
+
+  return data.today
+    .filter(
+      (entry) =>
+        Number.isInteger(entry?.id) &&
+        typeof entry.title === 'string' &&
+        entry.title &&
+        Number.isFinite(entry.unix),
+    )
+    .map((entry) => ({
+      anilistId: null,
+      malId: entry.id,
+      title: entry.title,
+      titleEnglish: entry.title,
+      titleRomaji: null,
+      synonyms: [],
+      totalEpisodes: null,
+      source: null,
+      genres: [],
+      bannerImage: null,
+      coverImage: null,
+      coverImageColor: null,
+      studios: [],
+      trailer: null,
+      // The Worker supplies the next air time but not its episode number.
+      episode: null,
+      airingAt: entry.unix,
+    }))
 }
 
 // ─── MAL user watchlists ──────────────────────────────────────────────────────
@@ -1079,7 +1139,12 @@ async function main() {
   }
 }
 
-export { findMatchingRelease, titleMatches }
+export {
+  fetchMalScheduleFallback,
+  fetchTodaysAiring,
+  findMatchingRelease,
+  titleMatches,
+}
 
 if (
   process.argv[1] &&

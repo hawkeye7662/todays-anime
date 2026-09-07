@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { findMatchingRelease, titleMatches } from '../script.js'
+import {
+  fetchTodaysAiring,
+  findMatchingRelease,
+  titleMatches,
+} from '../script.js'
 
 const NOW = 1_000_000
 
@@ -74,4 +78,69 @@ test('does not use an ambiguous or stale episode-number fallback', () => {
     ),
     null,
   )
+})
+
+test('falls back to the MAL schedule Worker when AniList fails', async () => {
+  const requests = []
+  const request = async (url) => {
+    requests.push(url)
+
+    if (url === 'https://graphql.anilist.co') {
+      return {
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+      }
+    }
+
+    return {
+      ok: true,
+      json: async () => ({
+        today: [
+          {
+            id: 123,
+            title: 'Fallback Anime',
+            unix: 1_788_787_800,
+          },
+        ],
+      }),
+    }
+  }
+  const originalWarn = console.warn
+  console.warn = () => {}
+
+  try {
+    const airing = await fetchTodaysAiring(
+      new Date('2026-09-07T12:00:00.000Z'),
+      request,
+    )
+
+    assert.deepEqual(airing, [
+      {
+        anilistId: null,
+        malId: 123,
+        title: 'Fallback Anime',
+        titleEnglish: 'Fallback Anime',
+        titleRomaji: null,
+        synonyms: [],
+        totalEpisodes: null,
+        source: null,
+        genres: [],
+        bannerImage: null,
+        coverImage: null,
+        coverImageColor: null,
+        studios: [],
+        trailer: null,
+        episode: null,
+        airingAt: 1_788_787_800,
+      },
+    ])
+  } finally {
+    console.warn = originalWarn
+  }
+
+  assert.deepEqual(requests, [
+    'https://graphql.anilist.co',
+    'https://today.hzwk.workers.dev/',
+  ])
 })

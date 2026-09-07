@@ -73,4 +73,5 @@ Create one cron-job.org job per workflow.
 
 - The daily summary workflow posts the scheduled list for the day.
 - The release notifier workflow posts only newly detected releases and uses `.cache/todays-anime/releases.json` to avoid reposting the same release.
+- If AniList is unavailable, the script logs the failure and uses the deployed MAL schedule Worker at `https://today.hzwk.workers.dev/` instead.
 - Manual runs from the GitHub Actions UI still work because both workflows keep `workflow_dispatch`.
